@@ -103,10 +103,9 @@ REDDIT = create_reddit_instance()
 def login():
     """Generate JWT
     """
-
     secret = request.json.get('api_key')
 
-    if secret != os.environ['SRVC_SHARED_SECRET']:  # if the secret matches
+    if secret != os.environ['SRVC_SHARED_SECRET']:
         return jsonify({"message": "Invalid secret"}), 401
 
     # generate access token
@@ -117,25 +116,26 @@ def login():
 def get_version():
     """Get service version semver
     """
-
     response = get_rollama_version()
 
     if isinstance(response, dict) and 'error' in response:
         return jsonify(response), 400
-    elif response is False:  # New elif block to handle False responses
-        # Return a custom error message or status code
+    elif response is False:
         custom_error = {'message': 'Version information is not available'}
         log_message_to_db(os.environ['SRVC_NAME'], 'VERSION_INFO_NOT_AVAILABLE', 'ERROR', custom_error)
         return jsonify(custom_error), 500
     elif isinstance(response, dict):
         return jsonify(response)
+    
+    # Handle unexpected response types
+    error_msg = {'message': 'Unexpected response type from version service'}
+    return jsonify(error_msg), 500
 
 @app.route('/analyze_post', methods=['GET'])
 @jwt_required()
 def analyze_post_endpoint():
     """Chat prompt a given post_id
     """
-
     post_id = request.args.get('post_id')
     analyze_post(post_id)
     return jsonify({'message': 'analyze_post endpoint'})
@@ -145,36 +145,38 @@ def analyze_post_endpoint():
 def analyze_posts_endpoint():
     """Chat prompt all post_ids
     """
-
     analyze_posts()
     return jsonify({'message': 'analyze_posts endpoint'})
 
 def analyze_posts():
     """Chat prompt a post title + post body
     """
-
     info_message = 'Analyzing Posts'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
     
     post_ids = db_get_post_ids()
     if not post_ids:
-        return
+        warn_message = 'No posts to analyze'
+        logging.warning(warn_message)
+        log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'WARNING', warn_message)
+        return False
 
-    with ProcessPoolExecutor(max_workers=PROC_WORKERS) as executor:  # PROC_WORKERS in setup.cfg
+    with ProcessPoolExecutor(max_workers=PROC_WORKERS) as executor:
         futures = [executor.submit(analyze_post, a_post_id) for a_post_id in post_ids]
-        results = [future.result() for future in futures]  # if you need the result of each analysis
-        
+        # Wait for all tasks to complete
+        for future in futures:
+            future.result()
 
     info_message = 'All posts analyzed'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
+    return True
 
 def analyze_post(post_id):
     """Analyze text from Reddit Post
     """
-
-    print (f'Analyzing post ID {post_id}')
+    print(f'Analyzing post ID {post_id}')
     info_message = f'Analyzing post ID {post_id}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -201,7 +203,7 @@ def analyze_post(post_id):
         warn_message = f'Post ID {post_id} contains no body' 
         logging.warning(warn_message)
         log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'WARNING', warn_message)
-        return
+        return False
 
     # post_title, post_body for ChatGPT
     text = post_data['post_title'] + post_data['post_body']
@@ -216,12 +218,13 @@ def analyze_post(post_id):
                 info_message = f'Skipping {post_id} - language detected {language}'
                 logging.info(info_message)
                 log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
-                return
+                return False
         except langdetect.lang_detect_exception.LangDetectException as e:
             add_key('post_id_' + post_id)
             info_message = f'Skipping {post_id} - language detected UNKNOWN {e}'
             logging.info(info_message)
             log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
+            return False
             
         prompt = 'respond to this post title and post body: '
 
@@ -249,13 +252,14 @@ def analyze_post(post_id):
                         }
         insert_data_into_table('analysis_documents', analysis_data)
         store_model_perf_info(llm, analyzed_obj, prompt_completion_time)
+    
+    return True
 
 @app.route('/analyze_comment', methods=['GET'])
 @jwt_required()
 def analyze_comment_endpoint():
     """Chat prompt a given comment_id
     """
-
     comment_id = request.args.get('comment_id')
     analyze_comment(comment_id)
     return jsonify({'message': 'analyze_comment endpoint'})
@@ -265,34 +269,34 @@ def analyze_comment_endpoint():
 def analyze_comments_endpoint():
     """Chat prompt all post_ids
     """
-
     analyze_comments()
     return jsonify({'message': 'analyze_comments endpoint'})
 
 def analyze_comments():
     """Chat prompt a comment
     """
-
     logging.info('Analyzing Comments')
     comment_ids = db_get_comment_ids()
     if not comment_ids:
         warn_message = 'No comments to analyze'
         logging.warning(warn_message)
         log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'WARNING', warn_message)
-        return
+        return False
 
-    with ProcessPoolExecutor(max_workers=PROC_WORKERS) as executor:  # PROC_WORKERS in setup.cfg
+    with ProcessPoolExecutor(max_workers=PROC_WORKERS) as executor:
         futures = [executor.submit(analyze_comment, a_comment_id) for a_comment_id in comment_ids]
-        results = [future.result() for future in futures]  # if you need the result of each analysis
+        # Wait for all tasks to complete
+        for future in futures:
+            future.result()
 
     info_message = 'All comments analyzed'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
+    return True
 
 def analyze_comment(comment_id):
     """Analyze text
     """
-
     info_message = f'Analyzing comment ID {comment_id}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -308,13 +312,13 @@ def analyze_comment(comment_id):
                     NOT IN ('', '[removed]', '[deleted]');
                 """
 
-    comment_data =  get_select_query_results(sql_query, (comment_id,))
+    comment_data = get_select_query_results(sql_query, (comment_id,))
 
     if not comment_data:
         warn_message = f'Comment ID {comment_id} contains no body'
         logging.warning(warn_message)
         log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'WARNING', warn_message)
-        return
+        return False
 
     # comment_body for ChatGPT
     text = comment_data[0][1]
@@ -329,12 +333,13 @@ def analyze_comment(comment_id):
                 info_message = f'Skipping {comment_id} - language detected {language}'
                 logging.info(info_message)
                 log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
-                return
+                return False
         except langdetect.lang_detect_exception.LangDetectException as e:
             add_key('comment_id_' + comment_id)
             info_message = f'Skipping {comment_id} - language detected UNKNOWN {e}'
             logging.info(info_message)
             log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
+            return False
 
         prompt = 'respond to this comment: '
 
@@ -363,13 +368,14 @@ def analyze_comment(comment_id):
 
             insert_data_into_table('analysis_documents', analysis_data)
             store_model_perf_info(llm, analyzed_obj, prompt_completion_time)
+    
+    return True
 
 @app.route('/get_sub_post', methods=['GET'])
 @jwt_required()
 def get_post_endpoint():
     """Get submission post content for a given post id
     """
-
     post_id = request.args.get('post_id')
     get_sub_post(post_id)
     return jsonify({'message': 'get_sub_post endpoint'})
@@ -379,7 +385,6 @@ def get_post_endpoint():
 def get_sub_posts_endpoint():
     """Get submission posts for a given subreddit
     """
-
     sub = request.args.get('sub')
     get_sub_posts(sub)
     return jsonify({'message': 'get_sub_posts endpoint'})
@@ -387,7 +392,6 @@ def get_sub_posts_endpoint():
 def get_sub_post(post_id):
     """Get a submission post
     """
-
     info_message = f'Getting post id {post_id}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -400,13 +404,13 @@ def get_sub_post(post_id):
 def get_sub_posts(sub):
     """Get all posts for a given sub
     """
-
     info_message = f'Getting posts in subreddit {sub}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
     try:
         posts = REDDIT.subreddit(sub).hot(limit=None)
         new_post_ids = get_new_data_ids('posts', 'post_id', posts)
+
 
         for post_id in new_post_ids:
             get_sub_post(post_id)
@@ -423,7 +427,6 @@ def get_sub_posts(sub):
 def get_post_comments(post_obj):
     """Get all comments made to a submission post
     """
-
     info_message = f'Getting comments for post {post_obj.id}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -436,6 +439,7 @@ def get_post_comments(post_obj):
         warn_message = f'{post_obj.id} has no comments'
         logging.warning(warn_message)
         log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'WARNING', warn_message)
+        return
 
     # Create a dictionary to store parent-child relationships
     comment_dict = {c.id: c for c in all_comments}
@@ -467,7 +471,6 @@ def get_post_comments(post_obj):
 def get_post_details(post):
     """Get details for a submission post
     """
-
     post_author = post.author.name if post.author else None
 
     if post_author and post_author != 'AutoModerator':
@@ -491,7 +494,6 @@ def get_post_details(post):
 def get_comment_details(comment):
     """Get comment details
     """
-
     comment_author = comment.author.name if comment.author else None
     comment_submitter = comment.is_submitter if hasattr(comment, 'is_submitter') else None
     comment_edited = str(int(comment.edited)) if comment.edited else False
@@ -518,7 +520,6 @@ def get_comment_details(comment):
 def get_author_comments_endpoint():
     """Get all comments for a given author
     """
-
     author = request.args.get('author')
     get_author_comments(author)
     return jsonify({'message': 'get_author_comments endpoint'})
@@ -528,14 +529,12 @@ def get_author_comments_endpoint():
 def get_authors_comments_endpoint():
     """Get all comments for each author from a list of author in db
     """
-
     get_authors_comments()
     return jsonify({'message': 'get_authors_comments endpoint'})
 
 def process_author(author_name):
     """Process author information.
     """
-
     if not lookup_key('author_id_' + author_name):
         info_message = f'Processing Author {author_name}'
         logging.info(info_message)
@@ -561,7 +560,6 @@ def process_author(author_name):
 def get_author(anauthor):
     """Get author info of a comment or a submission
     """
-
     if anauthor:
         process_author(anauthor)
         get_author_comments(anauthor)
@@ -569,7 +567,6 @@ def get_author(anauthor):
 def process_comment(comment):
     """Process a single comment
     """
-
     comment_body = comment.body
 
     if comment_body not in ('[removed]', '[deleted]') and comment.author.name != 'AutoModerator':
@@ -587,7 +584,6 @@ def get_authors_comments():
     """Get comments and posts for authors listed in the author table, 
         insert data into db
     """
-
     authors = db_get_authors()
     if not authors:
         warn_message = 'db_get_authors(): No authors found in DB'
@@ -620,7 +616,6 @@ def get_authors_comments():
 def get_author_comments(author):
     """Get author comments, author posts, insert data into db
     """
-
     info_message = f'Getting comments for {author}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -668,14 +663,12 @@ def get_author_comments(author):
 def join_new_subs_endpoint():
     """Join all new subs from post database
     """
-
     join_new_subs()
     return jsonify({'message': 'join_new_subs_endpoint endpoint'})
 
 def join_new_subs():
     """Join newly discovered subreddits
     """
-
     info_message = 'Joining New Subs'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -731,7 +724,6 @@ def join_new_subs():
 def get_and_analyze_post_endpoint():
     """Fetch post from Reddit, then Chat prompt a given post_id
     """
-
     post_id = request.args.get('post_id')
     get_and_analyze_post(post_id)
     return jsonify({'message': 'get_and_analyze_post endpoint'})
@@ -739,7 +731,6 @@ def get_and_analyze_post_endpoint():
 def get_and_analyze_post(post_id):
     """If post does not exist, fetch it, then analyze it
     """
-
     post_ids = db_get_post_ids()
     if not post_ids or post_id not in post_ids:
         warn_message = f'Post ID {post_id} not found in local database'
@@ -757,7 +748,6 @@ def get_and_analyze_post(post_id):
 def get_and_analyze_comment_endpoint():
     """Fetch comment from Reddit, then Chat prompt a given comment_id
     """
-
     comment_id = request.args.get('comment_id')
     get_and_analyze_comment(comment_id)
     return jsonify({'message': 'get_and_analyze_comment endpoint'})
@@ -765,7 +755,6 @@ def get_and_analyze_comment_endpoint():
 def get_comment(comment_id):
     """Get a Reddit comment
     """
-
     info_message = f'Getting comment id {comment_id}'
     logging.info(info_message)
     log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
@@ -775,9 +764,8 @@ def get_comment(comment_id):
     insert_data_into_table('comments', comment_data)
 
 def get_and_analyze_comment(comment_id):
-    """If post does not exist, fetch it, then analyze it
+    """If comment does not exist, fetch it, then analyze it
     """
-
     comment_ids = db_get_comment_ids()
     if not comment_ids or comment_id not in comment_ids:
         warn_message = f'Comment ID {comment_id} not found in local database'
@@ -786,7 +774,7 @@ def get_and_analyze_comment(comment_id):
         get_comment(comment_id)
         analyze_comment(comment_id)
     else:
-        info_message = 'Comment ID {comment_id} has already been analyzed'
+        info_message = f'Comment ID {comment_id} has already been analyzed'  # Fixed f-string
         logging.info(info_message)
         log_message_to_db(os.environ['SRVC_NAME'], get_rollama_version()['version'], 'INFO', info_message)
 
@@ -803,4 +791,4 @@ if __name__ == "__main__":
     app.run(port=5001,
             host='0.0.0.0',
             ssl_context=('cert.pem', 'key.pem'),
-            debug=False) # not for production
+            debug=True) # not for production
