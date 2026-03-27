@@ -1,14 +1,17 @@
-# database.py
+# shared/database/__init__.py
 # ©2024, Ovais Quraishi
-"""DB Utils
+"""Shared database utilities for ROLLAMA-GPT
 
-This module is a backward-compatible wrapper around the shared database module.
-New code should import from shared.database directly.
+This module provides a centralized database layer that eliminates
+duplication between the backend and frontend database modules.
 """
 
-# Re-export all database functions for backward compatibility
-from shared.database import (
+from .connection import (
+    DatabaseConnection,
+    get_connection,
     psql_connection,
+)
+from .queries import (
     execute_query,
     get_select_query_results,
     get_select_query_result_dicts,
@@ -20,12 +23,17 @@ from shared.database import (
 )
 
 __all__ = [
+    # Connection management
+    'DatabaseConnection',
+    'get_connection',
     'psql_connection',
+    # Query execution
     'execute_query',
     'get_select_query_results',
     'get_select_query_result_dicts',
     'insert_data_into_table',
     'get_new_data_ids',
+    # Repository functions
     'db_get_authors',
     'db_get_post_ids',
     'db_get_comment_ids',

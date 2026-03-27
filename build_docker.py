@@ -5,56 +5,66 @@
     ©2024, Ovais Quraishi
 """
 
-import configparser
-import docker
+import logging
 from pathlib import Path
 
-# override option transformation to preserve case
-class CaseSensitiveConfigParser(configparser.RawConfigParser):
-    def optionxform(self, optionstr):
-        return optionstr
+import docker
 
-CONFIG_FILE = 'setup.config'
+from shared.config import read_config, CaseSensitiveConfigParser, CONFIG_FILE
 
-def read_config(file_path):
-    """Read setup config file"""
-    config_dict = {}
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-    if Path(str(Path(file_path).resolve())).exists():
-        config_obj = CaseSensitiveConfigParser()
-        config_obj.read(file_path)
-        for section_name, options in config_obj.items():
-            for option_name, option_value in options.items():
-                config_dict[option_name] = option_value
-        return config_dict
-    print(f'{CONFIG_FILE} file not found. Assuming ENV VARS are set up using some other method')
 
 def get_config():
-    """Returns the parsed configuration object"""
-    return read_config(CONFIG_FILE)
+    """Returns the parsed configuration object as a dictionary."""
+    config = read_config(CONFIG_FILE)
+    return config.raw_config if config.raw_config else {}
+
 
 def get_ver():
+    """Get version from ver.txt file."""
     with open('ver.txt', 'r') as file:
         content = file.read()
     return content.strip()
 
+
 def create_docker_client(engine, remote_host=None, remote_port=22):
-    """Create Docker client for local or remote engine"""
+    """Create Docker client for local or remote engine.
+
+    Args:
+        engine: 'local' or 'remote'
+        remote_host: SSH host string (e.g., 'user@1.2.3.4')
+        remote_port: SSH port number
+
+    Returns:
+        Docker client instance
+    """
     if engine == "remote":
         if not remote_host:
             raise ValueError("remote_host must be specified when engine is 'remote'")
         docker_host_str = f"ssh://{remote_host}:{remote_port}"
-        print(f"Connecting to remote Docker engine at {docker_host_str}")
+        logger.info("Connecting to remote Docker engine at %s", docker_host_str)
         client = docker.DockerClient(base_url=docker_host_str)
     else:
-        print("Connecting to local Docker engine")
+        logger.info("Connecting to local Docker engine")
         client = docker.from_env()
     return client
 
+
 def build_docker_container(client, dockerfile_path, image_name, tag="latest", build_args=None):
-    """Build docker container"""
+    """Build docker container.
+
+    Args:
+        client: Docker client instance
+        dockerfile_path: Path to Dockerfile directory
+        image_name: Name for the Docker image
+        tag: Tag for the Docker image
+        build_args: Build arguments dictionary
+    """
     try:
-        print(f"Building Docker image {image_name}:{tag} from {dockerfile_path}...")
+        logger.info("Building Docker image %s:%s from %s...", image_name, tag, dockerfile_path)
         _, logs = client.images.build(
             path=dockerfile_path,
             tag=f"{image_name}:{tag}",
@@ -65,17 +75,18 @@ def build_docker_container(client, dockerfile_path, image_name, tag="latest", bu
 
         for log in logs:
             if 'stream' in log:
-                print(log['stream'].strip())
+                logger.info(log['stream'].strip())
 
-        print(f"Docker image {image_name}:{tag} built successfully!")
+        logger.info("Docker image %s:%s built successfully!", image_name, tag)
         get_this_image = client.images.get(f"{image_name}:{tag}")
         get_this_image.tag(f"{image_name}:latest")
 
     except docker.errors.BuildError as e:
-        print(f"Failed to build Docker image {image_name}:{tag}: {e}")
+        logger.error("Failed to build Docker image %s:%s: %s", image_name, tag, e)
 
     except docker.errors.APIError as e:
-        print(f"Docker API error while building image {image_name}:{tag}: {e}")
+        logger.error("Docker API error while building image %s:%s: %s", image_name, tag, e)
+
 
 if __name__ == "__main__":
     dockerfile_path = str(Path().absolute())
@@ -91,4 +102,3 @@ if __name__ == "__main__":
 
     client = create_docker_client(engine, remote_host, remote_port)
     build_docker_container(client, dockerfile_path, image_name, tag, build_args)
-

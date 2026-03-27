@@ -9,7 +9,12 @@ import re
 import socket
 from pathlib import Path
 
-from database import insert_data_into_table
+
+def _get_insert_function():
+    """Lazy import to avoid circular dependency."""
+    from shared.database.queries import insert_data_into_table
+    return insert_data_into_table
+
 
 def log_message_to_db(program_name, program_version, severity, log_message):
     """Log a message to the database.
@@ -47,7 +52,8 @@ def log_message_to_db(program_name, program_version, severity, log_message):
            }
     
     # insert data into table
-    insert_data_into_table('rollamalogs', data)
+    insert_fn = _get_insert_function()
+    insert_fn('rollamalogs', data)
 
 def get_rollama_version():
     """Reads the first line from /usr/local/rollama/ver.txt,
